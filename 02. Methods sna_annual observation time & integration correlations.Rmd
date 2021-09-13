@@ -1,0 +1,791 @@
+---
+title: "B. Methods sna - annual observation time & integration correlations"
+author: "Nic TG"
+date: "5/8/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, messages = FALSE}
+library(tidyverse)
+library(ggcorrplot)
+library(corrplot)
+select<- dplyr::select
+
+# for total possible observation time
+load("data/total possible focal and possible party membership.Rdata", verbose = T)
+
+# for directed degree n strength
+load("data/sna dataframe - unweighted measures, individual sna measure for each year, network sex, & behavior.Rdata", verbose = TRUE)
+# for all other measures
+load("data/sna dataframe - weighted measures, individual sna measure for each year, network sex, & behavior.Rdata", verbose = TRUE)
+
+colors <- colorRampPalette(c("blue", "white", "red"))(200)
+
+```
+```{r setup - create sna dfs with focal and party membership hours, include = FALSE}
+library(ggcorrplot)
+
+# grooming deg in out
+dir_uw_df_mixed <- dir_sna_measure_df_uw %>%
+  filter(network_sex == "any_combo") %>%
+  left_join(.,total_poss_foc_n_party, by = c("chimp_id" = "ID1","year", "sex")) %>%
+  select(chimp_id, sex, year, deg_in, deg_out, focal_hours, party_hours) 
+nrow(dir_uw_df_mixed) #200
+apply(dir_uw_df_mixed, 2, function(x) sum(is.na(x))) # all 0
+
+dir_uw_df_same <- dir_sna_measure_df_uw %>%
+  filter(network_sex != "any_combo") %>%
+  left_join(.,total_poss_foc_n_party, by = c("chimp_id" = "ID1","year", "sex")) %>%
+  select(chimp_id, sex, year, deg_in, deg_out, focal_hours, party_hours) 
+nrow(dir_uw_df_same) #200
+apply(dir_uw_df_same, 2, function(x) sum(is.na(x))) # all 0
+
+
+# grooming st in out
+dir_w_df_mixed <- dir_sna_measure_df_w %>%
+  filter(network_sex == "any_combo") %>%
+  left_join(.,total_poss_foc_n_party, by = c("chimp_id" = "ID1","year", "sex")) %>%
+  select(chimp_id, sex, year, deg_in, deg_out, focal_hours, party_hours)
+nrow(dir_w_df_mixed) #200
+apply(dir_w_df_mixed, 2, function(x) sum(is.na(x))) # all 0
+
+dir_w_df_same <- dir_sna_measure_df_w %>%
+  filter(network_sex != "any_combo") %>%
+  left_join(.,total_poss_foc_n_party, by = c("chimp_id" = "ID1","year", "sex")) %>%
+  select(chimp_id, sex, year, deg_in, deg_out, focal_hours, party_hours)
+nrow(dir_w_df_same) #200
+apply(dir_w_df_same, 2, function(x) sum(is.na(x))) # all 0
+
+# grooming bt, trans, ec
+other_gm_df_mixed <- all_sna_measure_df_w %>%
+  filter(behavior == "total_grooming" & network_sex == "any_combo") %>%
+  left_join(.,total_poss_foc_n_party, by = c("chimp_id" = "ID1","year", "sex")) %>%
+  select(chimp_id, sex, year, bt, trans, ec, focal_hours, party_hours) 
+nrow(other_gm_df_mixed) #200
+apply(other_gm_df_mixed, 2, function(x) sum(is.na(x))) # all 0
+
+other_gm_df_same<- all_sna_measure_df_w %>%
+  filter(behavior == "total_grooming" & network_sex != "any_combo") %>%
+  left_join(.,total_poss_foc_n_party, by = c("chimp_id" = "ID1","year", "sex")) %>%
+  select(chimp_id, sex, year, bt, trans, ec, focal_hours, party_hours) 
+nrow(other_gm_df_same) #200
+apply(other_gm_df_same, 2, function(x) sum(is.na(x))) # all 0
+
+# prox st, bt, trans, ec
+all_prox_df_mixed <- all_sna_measure_df_w %>%
+  filter(behavior == "prox" & network_sex == "any_combo") %>%
+  left_join(.,total_poss_foc_n_party, by = c("chimp_id" = "ID1","year", "sex")) %>%
+  select(chimp_id, sex, year, deg, bt, trans, ec, focal_hours, party_hours) 
+nrow(all_prox_df_mixed) #200
+apply(all_prox_df_mixed, 2, function(x) sum(is.na(x))) # all 0
+
+ all_prox_df_same<- all_sna_measure_df_w %>%
+  filter(behavior == "prox" & network_sex != "any_combo") %>%
+  left_join(.,total_poss_foc_n_party, by = c("chimp_id" = "ID1","year", "sex")) %>%
+  select(chimp_id, sex, year, deg, bt, trans, ec, focal_hours, party_hours) 
+nrow(all_prox_df_same) #200
+apply(all_prox_df_same, 2, function(x) sum(is.na(x))) # all 0
+
+```
+```{r setup - create sna and obs df, include=FALSE}
+sna_obs <- all_sna_measure_df_w %>%
+  distinct(chimp_id, year) %>%
+  left_join(total_poss_foc_n_party, by = c("chimp_id" = "ID1", "year"))
+  
+```
+
+
+## Observation time
+What were the mean and spread of focal and party membership hours...
+
+
+
+By year?
+```{r average number of focal and party hours per chimp year, message = FALSE, echo=FALSE,warning=FALSE}
+annual_obs <- sna_obs %>%
+  group_by(year) %>%
+  summarise(avg_focal = mean(focal_hours), sd_focal = sd(focal_hours), min_focal = min(focal_hours), max_focal = max(focal_hours), avg_party_memb = mean(party_hours), sd_party = sd(party_hours), min_party = min(party_hours), max_party = max(party_hours)) %>%
+  ungroup() %>%
+  mutate_if(is.numeric, round, 1) %>%
+  unite(col = "Mean ± sd focal hours per subject", c("avg_focal", "sd_focal"), sep = " ± ") %>%
+  unite(col = "Mean ± sd party hours per subject", c("avg_party_memb", "sd_party"), sep = " ± ") %>%
+select(year, starts_with("Mean"), everything())
+
+annual_obs_sex <- sna_obs %>%
+  group_by(year, sex) %>%
+  summarise(avg_focal = mean(focal_hours), sd_focal = sd(focal_hours), min_focal = min(focal_hours), max_focal = max(focal_hours), avg_party_memb = mean(party_hours), sd_party = sd(party_hours), min_party = min(party_hours), max_party = max(party_hours)) %>%
+  ungroup() %>%
+  mutate_if(is.numeric, round, 1) %>%
+  unite(col = "Mean ± sd focal hours per subject", c("avg_focal", "sd_focal"), sep = " ± ") %>%
+  unite(col = "Mean ± sd party hours per subject", c("avg_party_memb", "sd_party"), sep = " ± ") %>%
+select(year, sex, starts_with("Mean"))
+
+
+annual_obs 
+annual_obs_sex
+#write.table(annual_obs_sex, file = "results/tables/annual avg focal observations.txt", sep = "/", row.name = F, quote = F)
+```
+
+Across all years?
+```{r average across all chimp years, message = FALSE, echo=FALSE,warning=FALSE}
+sna_obs %>% 
+  summarise(avg_focal = mean(focal_hours), sd_focal = sd(focal_hours), min_focal = min(focal_hours), max_focal = max(focal_hours), avg_party_memb = mean(party_hours), sd_party = sd(party_hours), min_party = min(party_hours), max_party = max(party_hours)) %>%
+  select(starts_with("avg"), starts_with("sd"), everything()) %>%
+  ungroup()
+```
+
+Across all years by sex?
+```{r average across all chimp years by sex, message = FALSE, echo=FALSE,warning=FALSE}
+sna_obs %>% 
+  group_by(sex) %>%
+  summarise(avg_focal = mean(focal_hours), sd_focal = sd(focal_hours), min_focal = min(focal_hours), max_focal = max(focal_hours), avg_party_memb = mean(party_hours), sd_party = sd(party_hours), min_party = min(party_hours), max_party = max(party_hours)) %>%
+  select(starts_with("avg"), starts_with("sd"), everything()) %>%
+  ungroup()
+```
+
+
+## Observation time and integration
+Exploring how observation time, as focal or in parties, corresponds with integration measures.
+
+
+### Across all subjects
+
+Directed Grooming
+```{r - directed grooming deg, fig.keep = 'last', echo=FALSE, warning=FALSE}
+
+layout(t(1:2))
+
+# gm deg in out - mixed
+stat1 <- dir_uw_df_mixed %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor(.,  method = "spearman", use = "pairwise.complete.obs") 
+pmat1 <- dir_uw_df_mixed %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(.,  method = "spearman", use = "pairwise.complete.obs") %>% .[[1]] 
+
+corrplot(stat1, p.mat= pmat1, sig.level = c(.001, .01, .05),insig = "label_sig",         method="color",type = "upper", col = colors, title = "Total grooming mixed")
+
+# gm deg in out - same
+stat2 <- dir_uw_df_same %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor(.,  method = "spearman", use = "pairwise.complete.obs") 
+pmat2 <- dir_uw_df_same %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(.,  method = "spearman", use = "pairwise.complete.obs") %>% .[[1]] 
+
+colors <- colorRampPalette(c("blue", "white", "red"))(200)
+
+corrplot(stat2, p.mat= pmat2, sig.level = c(.001, .01, .05),insig = "label_sig",         method="color",type = "upper", col = colors, title = "Total grooming same")
+
+
+```
+
+```{r - directed grooming strength, fig.keep = 'last',echo=FALSE, warning=FALSE}
+layout(t(1:2))
+
+# gm st in out - mixed
+stat3 <- dir_w_df_mixed %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor(.,  method = "spearman", use = "pairwise.complete.obs") 
+pmat3 <- dir_w_df_mixed %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(.,  method = "spearman", use = "pairwise.complete.obs") %>% .[[1]]  
+
+colors <- colorRampPalette(c("blue", "white", "red"))(200)
+
+corrplot(stat3, p.mat= pmat3, sig.level = c(.001, .01, .05),insig = "label_sig",         method="color",type = "lower", col = colors, title = "Total grooming mixed")
+
+# gm st in out - same
+stat4 <- dir_w_df_same %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor(.,  method = "spearman", use = "pairwise.complete.obs") 
+pmat4 <- dir_w_df_same %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(.,  method = "spearman", use = "pairwise.complete.obs") %>% .[[1]] 
+
+colors <- colorRampPalette(c("blue", "white", "red"))(200)
+
+corrplot(stat4, p.mat= pmat4, sig.level = c(.001, .01, .05),insig = "label_sig",         method="color",type = "lower", col = colors,  title = "Total grooming same")
+
+```
+
+Total Grooming
+```{r - total grooming bt trans ec,  fig.keep = 'last', echo=FALSE, warning=FALSE}
+layout(t(1:2))
+
+# gm bt trans ec - mixed
+stat5 <- other_gm_df_mixed %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor(.,  method = "spearman", use = "pairwise.complete.obs") 
+pmat5 <- other_gm_df_mixed %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(.,  method = "spearman", use = "pairwise.complete.obs") %>% .[[1]] 
+
+colors <- colorRampPalette(c("blue", "white", "red"))(200)
+
+corrplot(stat5, p.mat= pmat5, sig.level = c(.001, .01, .05),insig = "label_sig",         method="color",type = "lower", col = colors, title = "Total grooming mixed")
+
+
+# gm bt trans ec - same
+stat6 <- other_gm_df_same %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor(.,  method = "spearman", use = "pairwise.complete.obs") 
+pmat6 <- other_gm_df_same %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(.,  method = "spearman", use = "pairwise.complete.obs") %>% .[[1]] 
+
+colors <- colorRampPalette(c("blue", "white", "red"))(200)
+
+corrplot(stat6, p.mat= pmat6, sig.level = c(.001, .01, .05),insig = "label_sig",         method="color",type = "lower", col = colors, title = "Total grooming mixed")
+```
+
+Proximity
+```{r - prox st bt trans ec,  fig.keep = 'last', echo=FALSE, warning=FALSE}
+layout(t(1:2))
+
+# prox st bt trans ec
+stat7 <- all_prox_df_mixed %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor(.,  method = "spearman", use = "pairwise.complete.obs") 
+pmat7 <- all_prox_df_mixed %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(.,  method = "spearman", use = "pairwise.complete.obs") %>% .[[1]] 
+
+colors <- colorRampPalette(c("blue", "white", "red"))(200)
+
+corrplot(stat7, p.mat= pmat7, sig.level = c(.001, .01, .05),insig = "label_sig",         method="color",type = "lower", col = colors)
+
+# prox st bt trans ec
+stat8 <- all_prox_df_same %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor(.,  method = "spearman", use = "pairwise.complete.obs") 
+pmat8 <- all_prox_df_same %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(.,  method = "spearman", use = "pairwise.complete.obs") %>% .[[1]] 
+
+colors <- colorRampPalette(c("blue", "white", "red"))(200)
+
+corrplot(stat8, p.mat= pmat8, sig.level = c(.001, .01, .05),insig = "label_sig",         method="color",type = "lower", col = colors)
+
+```
+
+### Within individuals
+
+Social animals may be observed more, but are animals more social when they’re observed more?
+
+Number of subjects for within individual analysis.
+```{r subjects for correlation , include = FALSE}
+# subjects with >=3 year in study
+rep <- dir_uw_df_mixed %>%
+  count(chimp_id) %>%
+  filter(n >= 3) %>%
+  pull(chimp_id)
+length(rep)
+
+sex <- dir_uw_df_mixed %>%
+  filter(chimp_id %in% rep) %>%
+  distinct(chimp_id, sex) %>%
+  pull(sex)
+length(sex)
+```
+
+#### Mixed sex
+
+**In-degree and out-degree - mixed sex**
+```{r gm dir deg mixed, echo=FALSE, warning=FALSE}
+stat <- vector("list", length = length(rep))
+pval <- vector("list", length = length(rep))
+data <- dir_uw_df_mixed
+  
+var_names <- data %>%
+  select(-chimp_id, -year, -sex) %>%
+  names()
+sna_names <- var_names[!(var_names %in% c("focal_hours", "party_hours"))]
+
+
+for(i in seq(rep)){
+  
+  corr_stat <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor(., method = "spearman") %>%
+  data.frame() %>%
+  select(all_of(sna_names)) %>%
+  rownames_to_column() %>%
+  filter(rowname %in% c("focal_hours", "party_hours")) %>% 
+  pivot_wider(names_from = rowname, values_from = sna_names)
+# when sd is 0, NA produced for cor stat
+
+  stat[[i]] <- data.frame(chimp_id = rep[i],sex = sex[i], corr_stat)
+  
+corr_pval <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(., method = "spearman") %>%
+  .[[1]] %>%
+  data.frame() %>%
+  set_names(., var_names) %>%
+  select(all_of(sna_names)) %>%
+  mutate(rowname = var_names) %>%
+  filter(rowname %in% c("focal_hours", "party_hours")) %>% 
+  pivot_wider(names_from = rowname, values_from = sna_names)  
+  
+  pval[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], corr_pval)
+
+}
+
+a1 <- do.call("rbind", stat) 
+c1 <- a1 %>%
+  summarise_if(is.numeric, list(avg_rho = mean, sd_rho = sd), na.rm = T) %>%
+  t()
+
+
+b1 <- do.call("rbind",pval) 
+d1 <- b1 %>%
+  summarise_if(is.numeric, list(avg_p = mean, sd_p = sd), na.rm = T) %>%
+  t()
+
+c1
+d1
+```
+**In-strength and out-strength - mixed sex**
+```{r gm dir st mixed, echo=FALSE, warning=FALSE}
+stat <- vector("list", length = length(rep))
+pval <- vector("list", length = length(rep))
+data <- dir_w_df_mixed
+
+var_names <- data %>%
+  select(-chimp_id, -year, -sex) %>%
+  names()
+sna_names <- var_names[!(var_names %in% c("focal_hours", "party_hours"))]
+
+
+for(i in seq(rep)){
+  
+  corr_stat <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor(., method = "spearman", use = "pairwise.complete.obs") %>%
+  data.frame() %>%
+  select(all_of(sna_names)) %>%
+  rownames_to_column() %>%
+  filter(rowname %in% c("focal_hours", "party_hours")) %>% 
+  pivot_wider(names_from = rowname, values_from = sna_names)
+# when sd is 0, NA produced for cor stat
+
+  stat[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], corr_stat)
+  
+corr_pval <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(., method = "spearman", use = "pairwise.complete.obs") %>%
+  .[[1]] %>%
+  data.frame() %>%
+  set_names(., var_names) %>%
+  select(all_of(sna_names)) %>%
+  mutate(rowname = var_names) %>%
+  filter(rowname %in% c("focal_hours", "party_hours")) %>% 
+  pivot_wider(names_from = rowname, values_from = sna_names)  
+  
+  pval[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], corr_pval)
+
+}
+
+a2 <- do.call("rbind", stat) 
+c2 <- a2 %>%
+  summarise_if(is.numeric, list(avg_rho = mean, sd_rho = sd), na.rm = T) %>%
+  t()
+
+b2 <- do.call("rbind",pval) 
+d2 <- b2 %>%
+  summarise_if(is.numeric, list(avg_p = mean, sd_p = sd), na.rm = T) %>%
+  t()
+c2
+d2
+```
+**Grooming bt, trans, and ec - mixed sex**
+```{r total gm mixed, echo=FALSE, warning=FALSE}
+stat <- vector("list", length = length(rep))
+pval <- vector("list", length = length(rep))
+data <- other_gm_df_mixed 
+
+var_names <- data %>%
+  select(-chimp_id, -year, -sex) %>%
+  names()
+sna_names <- var_names[!(var_names %in% c("focal_hours", "party_hours"))]
+
+for(i in seq(rep)){
+  
+  corr_stat <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor(., method = "spearman", use = "pairwise.complete.obs") %>%
+  data.frame() %>%
+  select(all_of(sna_names)) %>%
+  rownames_to_column() %>%
+  filter(rowname %in% c("focal_hours", "party_hours")) %>% 
+  pivot_wider(names_from = rowname, values_from = sna_names)
+# when sd is 0, NA produced for cor stat
+
+  stat[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], corr_stat)
+  
+corr_pval <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(., method = "spearman", use = "pairwise.complete.obs") %>%
+  .[[1]] %>%
+  data.frame() %>%
+  set_names(., var_names) %>%
+  select(all_of(sna_names)) %>%
+  mutate(rowname = var_names) %>%
+  filter(rowname %in% c("focal_hours", "party_hours")) %>% 
+  pivot_wider(names_from = rowname, values_from = sna_names)  
+  
+  pval[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], corr_pval)
+
+}
+
+a3<- do.call("rbind", stat) 
+c3 <- a3 %>%
+  summarise_if(is.numeric, list(avg_rho = mean, sd_rho = sd), na.rm = T) %>%
+  t()
+
+b3<-do.call("rbind",pval) 
+d3 <- b3 %>%
+  summarise_if(is.numeric, list(avg_p = mean, sd_p = sd), na.rm = T) %>%
+  t()
+c3
+d3
+```
+**Prox st, bt, trans, and ec - mixed sex**
+```{r prox mixed, echo=FALSE, warning=FALSE}
+stat <- vector("list", length = length(rep))
+pval <- vector("list", length = length(rep))
+data <- all_prox_df_mixed
+
+var_names <- data %>%
+  select(-chimp_id, -year, -sex) %>%
+  names()
+sna_names <- var_names[!(var_names %in% c("focal_hours", "party_hours"))]
+
+for(i in seq(rep)){
+  
+  corr_stat <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor(., method = "spearman", use = "pairwise.complete.obs") %>%
+  data.frame() %>%
+  select(all_of(sna_names)) %>%
+  rownames_to_column() %>%
+  filter(rowname %in% c("focal_hours", "party_hours")) %>% 
+  pivot_wider(names_from = rowname, values_from = sna_names)
+# when sd is 0, NA produced for cor stat
+
+  stat[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], corr_stat)
+  
+corr_pval <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(., method = "spearman", use = "pairwise.complete.obs") %>%
+  .[[1]] %>%
+  data.frame() %>%
+  set_names(., var_names) %>%
+  select(all_of(sna_names)) %>%
+  mutate(rowname = var_names) %>%
+  filter(rowname %in% c("focal_hours", "party_hours")) %>% 
+  pivot_wider(names_from = rowname, values_from = sna_names)  
+  
+  pval[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], corr_pval)
+
+}
+
+a4<- do.call("rbind", stat) 
+c4 <- a4%>%
+  summarise_if(is.numeric, list(avg_rho = mean, sd_rho = sd), na.rm = T) %>%
+  t()
+
+b4<-do.call("rbind",pval) 
+d4 <- b4 %>%
+  summarise_if(is.numeric, list(avg_p = mean, sd_p = sd), na.rm = T) %>%
+  t()
+c4
+d4
+
+```
+
+#### Same sex
+
+**In-degree and out-degree - same sex**
+```{r gm dir deg same, echo=FALSE, warning = FALSE}
+
+stat <- vector("list", length = length(rep))
+pval <- vector("list", length = length(rep))
+data <- dir_uw_df_same
+
+var_names <- dir_uw_df_same %>%
+  select(-chimp_id, -year, -sex) %>%
+  names()
+sna_names <- var_names[!(var_names %in% c("focal_hours", "party_hours"))]
+
+
+for(i in seq(rep)){
+  
+  corr_stat <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor(., method = "spearman", use = "pairwise.complete.obs") %>%
+  data.frame() %>%
+  select(all_of(sna_names)) %>%
+  rownames_to_column() %>%
+  filter(rowname %in% c("focal_hours", "party_hours")) %>% 
+  pivot_wider(names_from = rowname, values_from = sna_names)
+# when sd is 0, NA produced for cor stat
+
+  stat[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], corr_stat)
+  
+corr_pval <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(., method = "spearman", use = "pairwise.complete.obs") %>%
+  .[[1]] %>%
+  data.frame() %>%
+  set_names(., var_names) %>%
+  select(all_of(sna_names)) %>%
+  mutate(rowname = var_names) %>%
+  filter(rowname %in% c("focal_hours", "party_hours")) %>% 
+  pivot_wider(names_from = rowname, values_from = sna_names)  
+  
+  pval[[i]] <- data.frame(chimp_id = rep[i],sex =sex[i], corr_pval)
+
+}
+
+a5 <-do.call("rbind", stat) 
+c5 <- a5 %>%
+  summarise_if(is.numeric, list(avg_rho = mean, sd_rho = sd), na.rm = T) %>%
+  t()
+
+b5<-do.call("rbind",pval)
+d5 <- b5 %>%
+  summarise_if(is.numeric, list(avg_p = mean, sd_p = sd), na.rm = T) %>%
+  t()
+c5
+d5
+```
+**In-strength and out-strength - same sex**
+```{r gm dir st same, echo=FALSE, warning = FALSE}
+
+stat <- vector("list", length = length(rep))
+pval <- vector("list", length = length(rep))
+
+var_names <- dir_w_df_same %>%
+  select(-chimp_id, -year, -sex) %>%
+  names()
+sna_names <- var_names[!(var_names %in% c("focal_hours", "party_hours"))]
+
+
+for(i in seq(rep)){
+  
+  corr_stat <- dir_w_df_same %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor(., method = "spearman", use = "pairwise.complete.obs") %>%
+  data.frame() %>%
+  select(all_of(sna_names)) %>%
+  rownames_to_column() %>%
+  filter(rowname %in% c("focal_hours", "party_hours")) %>% 
+  pivot_wider(names_from = rowname, values_from = sna_names)
+# when sd is 0, NA produced for cor stat
+
+  stat[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], corr_stat)
+  
+corr_pval <- dir_w_df_same %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(., method = "spearman", use = "pairwise.complete.obs") %>%
+  .[[1]] %>%
+  data.frame() %>%
+  set_names(., var_names) %>%
+  select(all_of(sna_names)) %>%
+  mutate(rowname = var_names) %>%
+  filter(rowname %in% c("focal_hours", "party_hours")) %>% 
+  pivot_wider(names_from = rowname, values_from = sna_names)  
+  
+  pval[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], corr_pval)
+
+}
+
+a6<-do.call("rbind", stat) 
+c6 <- a6 %>%
+  summarise_if(is.numeric, list(avg_rho = mean, sd_rho = sd), na.rm = T) %>%
+  t()
+
+b6<-do.call("rbind",pval) 
+d6<- b6 %>%
+  summarise_if(is.numeric, list(avg_p = mean, sd_p = sd), na.rm = T) %>%
+  t()
+c6
+d6
+
+```
+**Grooming bt, trans, and ec - same sex**
+```{r total gm same, echo=FALSE, warning=FALSE}
+stat <- vector("list", length = length(rep))
+pval <- vector("list", length = length(rep))
+data <- other_gm_df_same 
+
+var_names <- data %>%
+  select(-chimp_id, -year, -sex) %>%
+  names()
+sna_names <- var_names[!(var_names %in% c("focal_hours", "party_hours"))]
+
+for(i in seq(rep)){
+  
+  corr_stat <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor(., method = "spearman", use = "pairwise.complete.obs") %>%
+  data.frame() %>%
+  select(all_of(sna_names)) %>%
+  rownames_to_column() %>%
+  filter(rowname %in% c("focal_hours", "party_hours")) %>% 
+  pivot_wider(names_from = rowname, values_from = sna_names)
+# when sd is 0, NA produced for cor stat
+
+  stat[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], corr_stat)
+  
+corr_pval <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(., method = "spearman") %>%
+  .[[1]] %>%
+  data.frame() %>%
+  set_names(., var_names) %>%
+  select(all_of(sna_names)) %>%
+  mutate(rowname = var_names) %>%
+  filter(rowname %in% c("focal_hours", "party_hours")) %>% 
+  pivot_wider(names_from = rowname, values_from = sna_names)  
+  
+  pval[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], corr_pval)
+
+}
+
+a7 <- do.call("rbind", stat)
+c7 <- a7 %>%
+  summarise_if(is.numeric, list(avg_rho = mean, sd_rho = sd), na.rm = T) %>%
+  t()
+
+b7 <- do.call("rbind",pval) 
+d7 <- b7 %>%
+  summarise_if(is.numeric, list(avg_p = mean, sd_p = sd), na.rm = T) %>%
+  t()
+c7
+d7
+```
+**Prox st, bt, trans, and ec - same sex**
+```{r prox same, echo=FALSE, warning=FALSE}
+stat <- vector("list", length = length(rep))
+pval <- vector("list", length = length(rep))
+data <- all_prox_df_same
+
+var_names <- data %>%
+  select(-chimp_id, -year, -sex) %>%
+  names()
+sna_names <- var_names[!(var_names %in% c("focal_hours", "party_hours"))]
+
+for(i in seq(rep)){
+  
+  corr_stat <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor(., method = "spearman", use = "pairwise.complete.obs") %>%
+  data.frame() %>%
+  select(all_of(sna_names)) %>%
+  rownames_to_column() %>%
+  filter(rowname %in% c("focal_hours", "party_hours")) %>% 
+  pivot_wider(names_from = rowname, values_from = sna_names)
+# when sd is 0, NA produced for cor stat
+
+  stat[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], corr_stat)
+  
+corr_pval <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(., method = "spearman", use = "pairwise.complete.obs") %>%
+  .[[1]] %>%
+  data.frame() %>%
+  set_names(., var_names) %>%
+  select(all_of(sna_names)) %>%
+  mutate(rowname = var_names) %>%
+  filter(rowname %in% c("focal_hours", "party_hours")) %>% 
+  pivot_wider(names_from = rowname, values_from = sna_names)  
+  
+  pval[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], corr_pval)
+
+}
+
+a8<- do.call("rbind", stat) 
+c8 <- a8 %>%
+  summarise_if(is.numeric, list(avg_rho = mean, sd_rho = sd), na.rm = T) %>%
+  t()
+
+b8<-do.call("rbind",pval) 
+d8 <- b8 %>%
+  summarise_if(is.numeric, list(avg_p = mean, sd_p = sd), na.rm = T) %>%
+  t()
+c8
+d8
+```
+
+**By sex within individual correlations of SNA by obs**
+```{r sna by obs rho and p averages by sex, echo = FALSE}
+r_rhos <- mget(paste0(rep("a",8), seq(1:8))) %>% bind_rows()
+#WHY NAs in by sex summaries?
+r_rhos %>%
+  filter(is.na(sex))
+r_rhos %>%
+  select(-chimp_id) %>%
+  group_by(sex) %>%
+  summarise_all(list(avg_rho =  mean, sd_rho = sd), na.rm = T)
+
+r_ps <- mget(paste0(rep("b",8), seq(1:8))) %>% bind_rows()
+r_ps %>%
+  group_by(sex) %>%
+  summarise_if(is.numeric, list(avg_p = mean, sd_p = sd), na.rm = T)
+```
+
+
+###### Max min within individual rho's and p's
+**max and min average rho's and p's**
+```{r range of by measure avg rhos, echo = FALSE}
+rhos <- unlist(mget(paste0(rep("c",6), c(1:3,5:7)))) # skipping prox
+data.frame(max = max(rhos), min = min(rhos), avg = mean(rhos))
+
+```
+
+```{r range of by measure avg ps, echo = FALSE}
+ps <- unlist(mget(paste0(rep("d",6), c(1:3,5:7)))) # skipping prox
+data.frame(max = max(ps), min = min(ps), avg = mean(ps))
+```
+
+**max and min raw rho's and p's**
+```{r range of by individual rhos, echo = FALSE}
+r_rhos <- mget(paste0(rep("a",8), seq(1:8))) %>% bind_rows()
+r_rhos %>%
+  select(-chimp_id, - sex) %>%
+  summarise_all(list(min = min, max = max), na.rm = T)
+  
+
+```
+
+```{r range of by individual ps, echo = FALSE}
+r_ps <- mget(paste0(rep("b",8), seq(1:8))) %>% bind_rows()
+r_ps %>%
+  select(-chimp_id, -sex) %>%
+  summarise_all(list(avg = mean, min = min, max = max), na.rm = T) %>%
+  t()
+
+```
+
+
+
+

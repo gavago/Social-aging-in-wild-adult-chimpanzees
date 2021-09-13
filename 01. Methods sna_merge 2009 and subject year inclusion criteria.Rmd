@@ -1,0 +1,214 @@
+---
+title: "A. Methods sna - merge 2009 and subject year inclusion criteria"
+author: "Nic TG"
+date: "5/7/2021"
+output: word_document
+---
+
+
+```{r setup, include=FALSE, messages = FALSE}
+library(tidyverse)
+library(ggcorrplot)
+library(corrplot)
+select<- dplyr::select
+
+load("data/sna dataframe - weighted measures, individual sna measure for each year, network sex, & behavior.Rdata", verbose = T)
+```
+
+## Study site and subjects
+1. Number of males and females throughout study? Number of chimp-years?
+
+```{r, echo = FALSE}
+all_sna_measure_df_w %>%
+  distinct(chimp_id, sex) %>%
+  count(sex)
+
+all_sna_measure_df_w %>%
+  distinct(chimp_id, year) %>%
+  nrow()
+
+
+```
+
+#### ages and total obs
+2. We included females > 12 years and males > 15 years, as the former represented a move to reproductive maturity(?) and an end of adolescence. 200 subject-years. Subjects ranged 12 - 57 yo. 26.5 +/-  11.6 y, mean sd. Observations 1 - 8 years, 2010 - 2017. Age calculated at mid year.
+
+```{r total subj, include=FALSE}
+
+all_sna_measure_df_w %>%
+  distinct(chimp_id, sex, year) %>%
+  group_by(sex) %>%
+  tally()
+
+all_sna_measure_df_w %>%
+  distinct(chimp_id, year) %>%
+  nrow()
+
+all_sna_measure_df_w %>%
+  summarise(max = max(age_mid_year), min = min(age_mid_year), mean = mean(age_mid_year), sd = sd(age_mid_year))
+
+all_sna_measure_df_w %>%
+  distinct(chimp_id, year) %>%
+  count(chimp_id) %>%
+  summarise(max_obs = max(n), min_obs = min(n), avg_obs = mean(n), sd_obs = sd(n))
+
+```
+
+
+
+## Data processing/analysis
+
+#### Merging 2009-2010
+
+1. Focal animal sampling began in Aug 2009. But low avg observations per individuals, so we collated data from 2009 with 2010. 
+```{r justify fold 2009 into 2010, eval=FALSE}
+load("data/total focal and possible focal per year (2009-2010 separate).Rdata", verbose = T)
+
+total_poss_focal %>%
+  group_by(year) %>%
+  summarise(mean = mean(n), sd = sd(n), spread_relative = sd/mean, min = min(n), max = max(n))
+
+load("data/total focal and possible focal per year.Rdata", verbose = T)
+
+total_poss_focal %>%
+  group_by(year) %>%
+  summarise(mean = mean(n), sd = sd(n), spread_relative = sd/mean, min = min(n), max = max(n))
+
+
+```
+
+
+#### Observation criteria for inclusion
+
+1. Overall, we excluded subject years when subjects were observed as focals for < 50 hours and were also observed as party members for < 100 hours. Few were observed for focaled < 50 and present in parties < 100 hours. These criteria flagged 8 chimp-years for removal. (NB: 4 of these were unique, not omitted for lack of presence in community for 26 weeks).
+
+[Previous version, corrected 5/6/2021: logic in filter was wrong, but in a good way, the following would have been overly conservative. "we only included individuals that were either observed as a focal >= 100 hours per year, or observed as a focal for > 50 hrs AND present in social parties for at least 100 hours of focal observation"]
+
+```{r filter sub-years: low time as focal, include = FALSE}
+#load("data/total focal and possible focal per year (2009-2010 separate).Rdata", verbose = T)
+load("data/total focal and possible focal per year.Rdata", verbose = T)
+#see explanation in A1 for what are "possible focals", covers rare chance that community member is not focaled in a given year, but is present in parties.
+
+# total number of annual focal hours of possible focals
+foc_hours <- total_poss_focal %>%
+  mutate(focal_hours = n/4) %>% #scan every 15 minutes
+  rename(focal_n = n) %>%
+  select(year, ID1, focal_n, focal_hours, short_presence)
+# number of focals with lo focal obs (< 100 hrs) in a given year
+lo_focal <- foc_hours %>%
+  filter(focal_hours < 100) %>%
+  arrange(year, ID1)
+
+nrow(lo_focal) #92, 112 chimp-years w lo focal observations, i.e. < 100 hrs... (a lot!!!)
+
+# many in 2009, 2011 & 2012
+lo_focal_by_year <- lo_focal %>%
+  count(year)
+
+# for checking if any members adequately observed as focals, but not often present in a party
+enough_focal <- foc_hours %>%
+  filter(focal_hours > 100) %>%
+  arrange(year, ID1)
+
+```
+
+```{r - time in party, include = FALSE}
+# Time in party
+load("data/focal party scans formatted.Rdata", verbose = T)
+source("functions/functions - data preparation.R")
+
+total_party_member <- foc_part %>%
+  count(ID2, year) %>%
+  add_individ_attr(ID1 = "ID2") %>%
+  add_age(dyad = F) %>%
+  filter_age(dyad = F) %>%
+  mark_short_time_pres_individ() %>%
+  mutate(party_hours = n/4) %>%
+  rename(party_n = n) %>%
+  select(year, ID1, party_n, party_hours, short_presence) %>% arrange(year, ID1)
+nrow(total_party_member) #214, number of focal scans individual was in party
+```
+
+```{r create total poss focal and party membership combined, include = FALSE}
+nrow(total_poss_focal) #215
+nrow(total_party_member) #214 
+
+total_poss_foc_n_party <- total_poss_focal %>%
+  left_join(.,total_party_member, by = c("year", "ID1", "short_presence")) %>%
+  mutate(party_hours = replace_na(party_hours, 0), party_n = replace_na(party_n, 0)) %>% #for GS 2011, only chimp focaled but never seen in party in a given year
+  mutate(focal_hours = n/4) %>% #scan every 15 minutes
+  rename(focal_n = n)
+nrow(total_poss_foc_n_party) #215
+total_poss_foc_n_party %>% filter(is.na(focal_n) | is.na(party_n)) #empty
+apply(total_poss_foc_n_party, 2, function(x) sum(is.na(x)))
+
+# save(total_poss_foc_n_party, file = "data/total possible focal and possible party membership.Rdata")
+
+```
+
+
+```{r - lo time as focal and lo party membership}
+
+#These are chimp-years to remove, lo focal hours and lo party hours
+lo_foc_lo_party <- total_poss_foc_n_party %>%
+  filter(focal_hours < 50 & party_hours < 100) %>%
+  filter(short_presence != 1) # removes 4 for short presence, 11 pre 09-10 merge
+lo_foc_lo_party # 4 
+
+# alternative removal criteria
+# chimp years to remove would be those that don't have over 50 focal hrs AND 100 party member hours. Removing all these would be too conservative... unclear why so many chimp years can have lo focal hours, some animals are just so socially peripheral they make themselves scarce... also evidence of years when observer effort is lower.
+alt_lo_foc_lo_party <- total_poss_foc_n_party %>%
+  filter(!(focal_hours > 50 & party_hours >= 100)) %>%
+  filter(short_presence != 1) 
+nrow(alt_lo_foc_lo_party) #27
+
+#save(lo_foc_lo_party, file = "data/subject years to remove for low observations (focal and party membership).Rdata") #resaved 5/7/21 removing 4 for short presence, so no overlap w presence criteria
+#apply in ghosts function - data preparation
+
+#which lo focals are saved from exclusion bc of time in party?
+lo_foc_hi_party <- total_poss_foc_n_party %>%
+  filter(focal_hours < 100 & party_hours >= 100)
+
+# nrow(lo_foc_hi_party) #84, 101
+
+# what is this for?
+# lo_focal %>% anti_join(lo_foc_lo_party) %>% anti_join(lo_foc_hi_party)
+# should just be those w short pres, true
+
+#final check if any members adequately observed as focals, but not often present in a party - there are no network members who were observed > 100 hours as focal but seen fewer than 100 hours in a party.
+low_party_hi_focal <- total_poss_foc_n_party %>%
+  filter(focal_hours > 100 & party_hours < 100)
+# is empty set, all w sufficient focal have > 100 party hours
+
+
+```
+
+
+
+We also excluded any individuals that were not present in the community for at least 6 months. This excluded 11 individuals, 4 of which also had lo focal hours and lo party membership. Altogether we excluded 15* chimp-years based on all observation criteria. *edited 5/6/21
+
+```{r who was not present in community > 6 mo in given year?}
+#load("data/total focal and possible focal per year (2009-2010 separate).Rdata", verbose = T)
+load("data/total focal and possible focal per year.Rdata", verbose = T)
+load("data/counts - gm and prox counts before removing short pres individs.Rdata", verbose = T)
+source("functions/functions - data preparation.R")
+
+shortpres_focal <- total_poss_focal %>% # is same as marked short time pres for gm and prox data directly
+  filter(short_presence == 1) %>%
+  select(year, ID1, sex) %>%
+  arrange(year, ID1)
+
+shortpres_focal
+
+shortpres_focal %>%
+ count(sex)
+#none in 2009, start in 2011
+
+#no overlap between low observation removals and short presence removals
+nrow(shortpres_focal) #11
+nrow(lo_foc_lo_party) #4
+full_join(lo_foc_lo_party, shortpres_focal) %>% nrow() #15, no overlap
+
+```
+
+

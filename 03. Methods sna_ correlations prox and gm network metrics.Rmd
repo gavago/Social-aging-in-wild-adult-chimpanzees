@@ -1,0 +1,289 @@
+---
+title: "C. Methods sna_ correlations prox and gm network metrics"
+author: "Nic TG"
+date: "5/11/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, messages = FALSE}
+library(tidyverse)
+library(ggcorrplot)
+library(corrplot)
+select<- dplyr::select
+
+# for directed degree n strength
+load("data/sna dataframe - unweighted measures, individual sna measure for each year, network sex, & behavior.Rdata", verbose = TRUE)
+# for all other measures
+load("data/sna dataframe - weighted measures, individual sna measure for each year, network sex, & behavior.Rdata", verbose = TRUE)
+
+colors <- colorRampPalette(c("blue", "white", "red"))(200)
+
+```
+
+```{r set up dfs, include=FALSE}
+
+st_g_mixed <- dir_sna_measure_df_w %>%
+  filter(network_sex == "any_combo") %>%
+  select(chimp_id, year, sex, deg_in, deg_out) %>%
+  rename(st_in_g = deg_in, st_out_g = deg_out)
+other_g_mixed <- all_sna_measure_df_w %>%
+  filter(network_sex == "any_combo", behavior == "total_grooming") %>%
+  select(chimp_id, year, sex, trans, bt, ec) %>%
+  rename(trans_g = trans, bt_g = bt, ec_g = ec)
+prox_mixed <- all_sna_measure_df_w %>%
+  filter(network_sex == "any_combo", behavior == "prox") %>%
+  select(chimp_id, year, sex, deg, trans, bt, ec) %>%
+  rename(st_p = deg, trans_p = trans, bt_p = bt, ec_p = ec)
+
+st_g_same <- dir_sna_measure_df_w %>%
+  filter(network_sex != "any_combo") %>%
+  select(chimp_id, year, sex, deg_in, deg_out) %>%
+  rename(st_in_g = deg_in, st_out_g = deg_out)
+other_g_same <- all_sna_measure_df_w %>%
+  filter(network_sex != "any_combo", behavior == "total_grooming") %>%
+  select(chimp_id, year, sex, trans, bt, ec) %>%
+  rename(trans_g = trans, bt_g = bt, ec_g = ec)
+prox_same <- all_sna_measure_df_w %>%
+  filter(network_sex != "any_combo", behavior == "prox") %>%
+  select(chimp_id, year, sex, deg, trans, bt, ec) %>%
+  rename(st_p = deg, trans_p = trans, bt_p = bt, ec_p = ec)
+
+mixed_df <- st_g_mixed %>% left_join(., other_g_mixed, by = c("chimp_id", "year", "sex")) %>% left_join(., prox_mixed, by = c("chimp_id", "year", "sex")) 
+
+same_df <- st_g_same %>% left_join(., other_g_same, by = c("chimp_id", "year", "sex")) %>% left_join(., prox_same, by = c("chimp_id", "year", "sex")) 
+
+```
+
+
+How well correlated are individual networks metrics in proximity vs grooming networks?
+
+## Across individuals
+```{r mixed across individuals, include=F}
+a <- mixed_df %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor() %>%
+  data.frame() 
+
+var_names <- names(a)
+
+cor_mat <- a %>%
+  select(ends_with("p")) %>%
+  rownames_to_column() %>%
+  filter(grepl("g", rowname)) %>%
+  column_to_rownames() %>%
+  as.matrix()
+
+pvals <- mixed_df %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest() %>%
+  .[[1]] %>%
+  data.frame() %>%
+  set_names(., var_names) %>%
+  mutate(rowname =  var_names) %>%
+  select(rowname, ends_with("p")) %>%
+  filter(grepl("g$", rowname)) 
+ pmat <- pvals %>%
+  column_to_rownames() %>%
+  as.matrix()
+
+corrplot(cor_mat, p.mat= pmat, sig.level = c(.001, .01, .05),insig = "label_sig",         method="color",type = "full", col = colors, title = "same")
+  
+mixed_pvals <- pvals %>%
+  pivot_longer(-rowname) %>%
+  filter(substr(rowname, 1,2) == substr(name, 1,2))
+  
+
+```
+
+```{r same across individuals, include=F}
+a <- same_df %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor() %>%
+  data.frame() 
+
+var_names <- names(a)
+
+cor_mat <- a %>%
+  select(ends_with("p")) %>%
+  rownames_to_column() %>%
+  filter(grepl("g", rowname)) %>%
+  column_to_rownames() %>%
+  as.matrix()
+
+pvals <- same_df %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest() %>%
+  .[[1]] %>%
+  data.frame() %>%
+  set_names(., var_names) %>%
+  mutate(rowname =  var_names) %>%
+  select(rowname, ends_with("p")) %>%
+  filter(grepl("g", rowname)) 
+ pmat <- pvals %>%
+  column_to_rownames() %>%
+  as.matrix()
+
+corrplot(cor_mat, p.mat= pmat, sig.level = c(.001, .01, .05),insig = "label_sig",         method="color",type = "full", col = colors, title = "same")
+  
+same_pvals <- pvals %>%
+  pivot_longer(-rowname) %>%
+  filter(substr(rowname, 1,2) == substr(name, 1,2))
+
+```
+
+Often correlated.
+## Within individuals
+
+want same metric but different network
+get p val of correlation for all metrics then pivot longer n filter
+
+```{r subjects for correlation , include = FALSE}
+# subjects with >= 3 year in study
+rep <- mixed_df %>%
+  count(chimp_id) %>%
+  filter(n >= 3) %>%
+  pull(chimp_id)
+
+sex <- mixed_df %>%
+  filter(chimp_id %in% rep) %>%
+  distinct(chimp_id, sex) %>%
+  pull(sex)
+```
+
+
+```{r within individuals mixed, echo = FALSE, warning=FALSE}
+rhos <- vector("list", length = length(rep))
+pval <- vector("list", length = length(rep))
+data <- mixed_df
+  
+var_names <- data %>%
+  select(-chimp_id, -year, -sex) %>%
+  names()
+# sna_names <- var_names[!(var_names %in% c("focal_hours", "party_hours"))]
+
+
+for(i in seq(rep)){
+  
+rho <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+    cor(., method = "spearman", use = "pairwise.complete.obs") %>%
+  data.frame() %>%
+  rownames_to_column() %>%
+  select(rowname, ends_with("p")) %>%
+  filter(grepl("g$", rowname)) %>%
+  pivot_longer(-rowname) %>%
+  filter(substr(rowname, 1,2) == substr(name, 1,2))
+
+rhos[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], rho)  
+
+corr_pval <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(., method = "spearman", use = "pairwise.complete.obs") %>%
+  .[[1]] %>%
+  data.frame() %>%
+  set_names(., var_names) %>%
+  mutate(rowname =  var_names) %>%
+  select(rowname, ends_with("p")) %>%
+  filter(grepl("g$", rowname)) %>%
+  pivot_longer(-rowname) %>%
+  filter(substr(rowname, 1,2) == substr(name, 1,2))
+  
+pval[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], corr_pval)
+
+}
+
+a <- do.call("rbind", rhos)
+b <- do.call("rbind", pval)
+# a %>% filter(is.na(value)) # WA YB have 0 st out
+
+rho_ms <- a %>%
+  group_by(rowname) %>%
+  summarise(avg = mean(value, na.rm = T), sd = sd(value, na.rm = T))
+pval_ms <- b %>%
+  group_by(rowname) %>%
+  summarise(avg = mean(value, na.rm = T), sd = sd(value, na.rm = T))
+pval_sex_ms <- b %>%
+  group_by(rowname, sex) %>%
+  summarise(avg = mean(value, na.rm = T), sd = sd(value, na.rm = T))
+pval_ms
+```
+
+```{r within individuals same, echo=FALSE, warning=FALSE}
+rhos <- vector("list", length = length(rep))
+pval <- vector("list", length = length(rep))
+data <- same_df
+  
+var_names <- data %>%
+  select(-chimp_id, -year, -sex) %>%
+  names()
+# sna_names <- var_names[!(var_names %in% c("focal_hours", "party_hours"))]
+
+
+for(i in seq(rep)){
+  
+rho <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+    cor(., method = "spearman", use = "pairwise.complete.obs") %>%
+  data.frame() %>%
+  rownames_to_column() %>%
+  select(rowname, ends_with("p")) %>%
+  filter(grepl("g$", rowname)) %>%
+  pivot_longer(-rowname) %>%
+  filter(substr(rowname, 1,2) == substr(name, 1,2))
+
+rhos[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], rho)
+  
+corr_pval <- data %>%
+  filter(chimp_id == rep[i]) %>%
+  select(-chimp_id, -year, -sex) %>%
+  cor.mtest(., method = "spearman", use = "pairwise.complete.obs") %>%
+  .[[1]] %>%
+  data.frame() %>%
+  set_names(., var_names) %>%
+  mutate(rowname =  var_names) %>%
+  select(rowname, ends_with("p")) %>%
+  filter(grepl("g$", rowname)) %>%
+  pivot_longer(-rowname) %>%
+  filter(substr(rowname, 1,2) == substr(name, 1,2))
+  
+pval[[i]] <- data.frame(chimp_id = rep[i], sex = sex[i], corr_pval)
+
+}
+
+a <- do.call("rbind", rhos)
+b <- do.call("rbind", pval)
+
+# a %>% filter(is.na(value)) # lots of no interaction
+rho_ss <- a %>%
+  group_by(rowname) %>%
+  summarise(avg = mean(value, na.rm = T), sd = sd(value, na.rm = T))
+pval_ss <- b %>%
+  group_by(rowname) %>%
+  summarise(avg = mean(value, na.rm = T), sd = sd(value, na.rm = T))
+pval_sex_ss <- b %>%
+  group_by(rowname, sex) %>%
+  summarise(avg = mean(value, na.rm = T), sd = sd(value, na.rm = T))
+pval_ss
+```
+
+**Range of prox and gm metric Spearman rhos**
+```{r range rhos, echo = FALSE}
+
+rbind(rho_ms, rho_ss) %>%
+  summarise(max = max(avg), min = min(avg))
+
+```
+
+**Range of prox and gm metric Spearman ps**
+```{r range ps, echo = FALSE}
+
+rbind(pval_ms, pval_ss) %>%
+  summarise(max = max(avg), min = min(avg))
+
+```
+
+
+Never correlated.
